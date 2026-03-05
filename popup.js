@@ -135,9 +135,21 @@ const updateUI = async () => {
 };
 
 const save = () => {
-  browser.storage.local.set({delay: q('#d').value, unit: q('#u').value, pin: q('#p').checked});
+  const dVal = q('#d').value;
   const btn = q('#a');
   clearTimeout(saveTimeout);
+  
+  if (!dVal || isNaN(dVal) || dVal <= 0) {
+    btn.innerText = "✖ Invalid";
+    btn.style.background = "var(--danger)";
+    saveTimeout = setTimeout(() => {
+      btn.innerText = "Discard Others";
+      btn.style.background = "";
+    }, 1000);
+    return;
+  }
+
+  browser.storage.local.set({delay: dVal, unit: q('#u').value, pin: q('#p').checked});
   btn.innerText = "Saved";
   btn.style.background = "var(--accent)";
   saveTimeout = setTimeout(() => {
