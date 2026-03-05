@@ -95,28 +95,50 @@
 
     .settings-group {
       display: flex;
-      justify-content: flex-start;
+      justify-content: space-between;
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 4px;
       padding: 8px 12px;
       margin-bottom: 12px;
       align-items: center;
-      gap: 6px; /* Espace réduit entre "Limit:" et l'input */
+    }
+
+    .limit-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
 
     .settings-group input {
-      width: 25px;
-      min-width: 25px;
+      width: 2ch;
+      min-width: 2ch;
+      max-width: 10ch;
       border: none;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1.5px solid var(--primary);
+      border-right: 1px solid rgba(0,0,0,0.1);
       background: transparent;
+      padding: 0 4px;
       color: var(--text);
       font-weight: 700;
       outline: none;
       text-align: center;
-      transition: width 0.1s ease;
+      transition: width 0.1s ease, color 0.2s, border-color 0.2s;
       -moz-appearance: textfield;
+    }
+
+    body.dark .settings-group input {
+      border-right-color: rgba(255,255,255,0.1);
+    }
+
+    .settings-group input:focus {
+      border-bottom-width: 2.5px;
+      margin-bottom: -1px;
+    }
+
+    .settings-group input.invalid {
+      color: var(--danger) !important;
+      border-bottom-color: var(--danger) !important;
     }
 
     /* Hide arrows Chrome, Safari, Edge, Opera */
@@ -133,7 +155,6 @@
       font-weight: 700;
       outline: none;
       cursor: pointer;
-      margin-left: 6px; /* Espace plus grand entre l'input et le select */
     }
 
     .checkbox-row {
@@ -213,8 +234,10 @@
     </header>
     
     <div class="settings-group">
-      <span>Limit:</span>
-      <input id="d" type="number" min="1">
+      <div class="limit-wrapper">
+        <span>Limit:</span>
+        <input id="d" type="text">
+      </div>
       <select id="u">
         <option value="s">sec</option>
         <option value="m">min</option>

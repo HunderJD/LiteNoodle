@@ -134,12 +134,25 @@ const updateUI = async () => {
   updateTimers();
 };
 
+const isValid = (val) => {
+  const n = parseFloat(val);
+  return !isNaN(n) && n > 0 && /^\d*\.?\d*$/.test(val);
+};
+
+const updateInputWidth = () => {
+  const input = q('#d');
+  const length = input.value.length || 1;
+  input.style.width = `${Math.min(length + 1, 10)}ch`;
+  input.classList.toggle('invalid', !isValid(input.value) && input.value !== "");
+};
+
 const save = () => {
   const dVal = q('#d').value;
+  updateInputWidth();
   const btn = q('#a');
   clearTimeout(saveTimeout);
   
-  if (!dVal || isNaN(dVal) || dVal <= 0) {
+  if (!isValid(dVal)) {
     btn.innerText = "✖ Invalid";
     btn.style.background = "var(--danger)";
     saveTimeout = setTimeout(() => {
@@ -149,8 +162,8 @@ const save = () => {
     return;
   }
 
-  browser.storage.local.set({delay: dVal, unit: q('#u').value, pin: q('#p').checked});
-  btn.innerText = "Saved";
+  browser.storage.local.set({delay: parseFloat(dVal), unit: q('#u').value, pin: q('#p').checked});
+  btn.innerText = "✓ Saved";
   btn.style.background = "var(--accent)";
   saveTimeout = setTimeout(() => {
     btn.innerText = "Discard Others";
@@ -160,6 +173,7 @@ const save = () => {
 };
 
 ['#d','#u','#p'].forEach(s => q(s).onchange = save);
+q('#d').oninput = updateInputWidth;
 
 q('#a').onclick = async () => {
   const s = await browser.storage.local.get();
@@ -176,6 +190,7 @@ browser.storage.local.get().then(s => {
   q('#d').value = s.delay || 15;
   q('#u').value = s.unit || 'm';
   q('#p').checked = !!s.pin;
+  updateInputWidth();
   
   if (s.theme) {
     updateThemeUI(s.theme === 'dark');
