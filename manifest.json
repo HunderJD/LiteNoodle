@@ -13,13 +13,13 @@
     "default_icon": "icon-light.svg",
     "theme_icons": [
       {
-        "light": "icon-light.svg",
-        "dark": "icon-dark.svg",
+        "light": "icon-dark.svg",
+        "dark": "icon-light.svg",
         "size": 32
       },
       {
-        "light": "icon-light.svg",
-        "dark": "icon-dark.svg",
+        "light": "icon-dark.svg",
+        "dark": "icon-light.svg",
         "size": 128
       }
     ]
