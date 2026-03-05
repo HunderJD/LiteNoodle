@@ -95,17 +95,19 @@
 
     .settings-group {
       display: flex;
+      justify-content: flex-start;
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 4px;
       padding: 8px 12px;
       margin-bottom: 12px;
-      gap: 10px;
       align-items: center;
+      gap: 6px; /* Espace réduit entre "Limit:" et l'input */
     }
 
     .settings-group input {
-      width: 35px;
+      width: 25px;
+      min-width: 25px;
       border: none;
       border-bottom: 1px solid var(--border);
       background: transparent;
@@ -113,6 +115,15 @@
       font-weight: 700;
       outline: none;
       text-align: center;
+      transition: width 0.1s ease;
+      -moz-appearance: textfield;
+    }
+
+    /* Hide arrows Chrome, Safari, Edge, Opera */
+    .settings-group input::-webkit-outer-spin-button,
+    .settings-group input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
     }
 
     .settings-group select {
@@ -122,6 +133,7 @@
       font-weight: 700;
       outline: none;
       cursor: pointer;
+      margin-left: 6px; /* Espace plus grand entre l'input et le select */
     }
 
     .checkbox-row {
@@ -201,7 +213,7 @@
     </header>
     
     <div class="settings-group">
-      <span>Limit</span>
+      <span>Limit:</span>
       <input id="d" type="number" min="1">
       <select id="u">
         <option value="s">sec</option>
