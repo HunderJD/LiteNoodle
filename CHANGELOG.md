@@ -9,11 +9,11 @@ All current features:
 - Reliability: Uses Alarms API for background consistency.
 
 ### Interface
-- Focus List: The popup now only displays tabs that are currently eligible for being unloaded.
+- Focus List: Only displays tabs currently eligible for unloading.
 - Clean Filter: Automatically hides active tabs, audible tabs, and system pages from the list.
+- Accurate Stats: Real-time counter of total loaded tabs (ignores system pages for true accuracy).
 - Modern UI: Dark/light mode toggle with visual feedback.
 - Hover Timer: View exactly when a tab will be unloaded.
-- Quick Stats: Real-time counter of total loaded tabs.
 
 ### Settings
 - Flexible Time: Set delay in seconds, minutes, or hours.

@@ -53,26 +53,27 @@ const updateUI = async () => {
   const list = q('#list');
   list.innerHTML = ''; 
   
-  // Strict filter: only tabs that CAN be unloaded and ARE NOT yet
-  const targets = allTabs.filter(t => {
+  // Filter for "Manageable" tabs only
+  const realTabs = allTabs.filter(t => {
     const url = t.url || "";
     const isSystem = url.startsWith('about:') || url.startsWith('chrome:');
     const isBlank = url === 'about:newtab' || url === 'about:blank' || url === 'about:home' || url === '';
-    const canDiscard = !isSystem || isBlank;
+    const isSystemPage = isSystem && !isBlank;
     
-    const isReallyAudible = t.audible && !t.mutedInfo?.muted;
+    if (isSystemPage) return false;
+    if (!p && t.pinned) return false;
     
-    return canDiscard && 
-           !t.discarded && 
-           !t.active && 
-           !isReallyAudible && 
-           (p || !t.pinned);
+    return true;
   });
 
-  const loadedTabs = allTabs.filter(t => !t.discarded).length;
-  q('#s').innerText = `${loadedTabs} / ${allTabs.length}`;
+  // Display all loaded manageable tabs (Active, Audible, and Targets)
+  const visibleTabs = realTabs.filter(t => !t.discarded);
 
-  targets.forEach(t => {
+  const loadedRealTabs = visibleTabs.length;
+  q('#s').innerText = `${loadedRealTabs} / ${realTabs.length}`;
+
+  visibleTabs.forEach(t => {
+    const isReallyAudible = t.audible && !t.mutedInfo?.muted;
     const item = document.createElement('div');
     item.className = 'tab-item';
     
@@ -82,22 +83,51 @@ const updateUI = async () => {
     const text = document.createElement('span');
     text.className = 'tab-text';
     text.innerText = t.title;
+    
+    // Highlight active tab
+    if (t.active) {
+      text.style.fontWeight = '700';
+    }
 
     const timer = document.createElement('span');
     timer.className = 'timer';
     timer.dataset.lastAccessed = t.lastAccessed;
     timer.dataset.active = t.active;
-    timer.dataset.audible = false;
+    timer.dataset.audible = isReallyAudible;
     timer.dataset.discarded = false;
 
     title.append(text, timer);
+
+    if (isReallyAudible) {
+      const speaker = document.createElement('span');
+      speaker.innerText = ' (Sound)';
+      speaker.style.fontSize = '8px';
+      speaker.style.marginLeft = '4px';
+      title.append(speaker);
+    }
+
     item.append(title);
 
-    const btn = document.createElement('button');
-    btn.className = 'status-btn';
-    btn.innerText = 'OFF';
-    btn.onclick = () => browser.tabs.discard(t.id).then(updateUI).catch(() => {});
-    item.append(btn);
+    // Only show OFF button for non-active, non-audible tabs
+    if (!t.active && !isReallyAudible) {
+      const btn = document.createElement('button');
+      btn.className = 'status-btn';
+      btn.innerText = 'OFF';
+      btn.onclick = () => browser.tabs.discard(t.id).then(updateUI).catch(() => {});
+      item.append(btn);
+    } else {
+      const spacer = document.createElement('div');
+      spacer.style.minWidth = '45px';
+      // Optional: Add a small indicator for the active tab
+      if (t.active) {
+        spacer.innerText = 'ACTIVE';
+        spacer.style.fontSize = '8px';
+        spacer.style.textAlign = 'center';
+        spacer.style.opacity = '0.5';
+        spacer.style.fontWeight = '800';
+      }
+      item.append(spacer);
+    }
 
     list.appendChild(item);
   });
