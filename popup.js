@@ -27,7 +27,7 @@ q('#theme-toggle').onchange = (e) => {
 const updateTimers = () => {
   const d = q('#d').value;
   const u = q('#u').value;
-  const limit = ms(d || 15, u || 'm');
+  const limit = ms(isValid(d) ? parseFloat(d) : 15, u || 'm');
   const now = Date.now();
   
   document.querySelectorAll('.timer').forEach(el => {
@@ -36,12 +36,21 @@ const updateTimers = () => {
     const isReallyAudible = el.dataset.audible === "true";
     const isDiscarded = el.dataset.discarded === "true";
 
+    let text = "";
     if (isDiscarded) {
-      el.innerText = '[soon]';
+      text = '[soon]';
     } else if (!isNaN(last) && !isActive && !isReallyAudible) {
-      el.innerText = `[${formatTime(limit - (now - last))}]`;
+      const remaining = limit - (now - last);
+      text = `[${formatTime(remaining)}]`;
+    }
+
+    el.innerText = text;
+    // Hide entirely if no content to show, but allow hover to show it via CSS
+    if (!text) {
+      el.style.display = 'none';
     } else {
-      el.innerText = '';
+      // Revert to CSS controlled display (none by default, inline on hover)
+      el.style.display = ''; 
     }
   });
 };
