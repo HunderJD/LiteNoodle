@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lite Noodle",
-  "version": "1.1",
+  "version": "1.0",
   "description": "Automatically unloads inactive tabs to save memory.",
   "permissions": ["tabs", "storage", "alarms"],
   "background": {
@@ -26,5 +26,15 @@
   },
   "icons": {
     "128": "icon-light.svg"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "merlo.johan@icloud.com",
+      "update_url": "https://hunderjd.github.io/LiteNoodle/update.json",
+      "data_collection_permissions": {
+        "consent": false,
+        "description": "Lite Noodle does not collect or transmit any user data."
+      }
+    }
   }
 }

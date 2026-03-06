@@ -1,0 +1,12 @@
+{
+  "addons": {
+    "merlo.johan@icloud.com": {
+      "updates": [
+        {
+          "version": "1.0",
+          "update_link": "https://hunderjd.github.io/LiteNoodle/lite_noodle.xpi"
+        }
+      ]
+    }
+  }
+}
