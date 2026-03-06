@@ -1,214 +1,312 @@
-const q = s => document.querySelector(s);
-let saveTimeout;
+// --- HELPER FUNCTIONS ---
 
-const ms = (d, u) => d * ({s:1e3, m:6e4, h:36e5}[u] || 6e4);
-const formatTime = (time) => {
-  if (time <= 0) return "soon";
-  const s = Math.floor(time / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+const $ = selector => document.querySelector(selector);
+
+const TIME_UNITS = { s: 1000, m: 60000, h: 3600000 };
+const toMs = (value, unit) => value * (TIME_UNITS[unit] || 60000);
+
+const formatDuration = (msTime) => {
+  if (msTime <= 0) return "soon";
+  const seconds = Math.floor(msTime / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
 };
 
-const updateThemeUI = (isDark) => {
+const isInputValid = (val) => {
+  const num = parseFloat(val);
+  return !isNaN(num) && num > 0 && /^\d*\.?\d*$/.test(val);
+};
+
+// --- STATE MANAGEMENT ---
+
+let saveVisualFeedbackTimeout;
+let userIsTyping = false;
+
+// --- CORE FUNCTIONS ---
+
+const updateTheme = (isDark) => {
   document.body.classList.toggle('dark', isDark);
-  q('#theme-toggle').checked = isDark;
-  q('.brand-logo img').src = isDark ? 'icon-dark.svg' : 'icon-light.svg';
+  $('#theme-toggle').checked = isDark;
+  $('.brand-logo img').src = isDark ? 'icon-dark.svg' : 'icon-light.svg';
 };
 
-q('#theme-toggle').onchange = (e) => {
-  const isDark = e.target.checked;
-  updateThemeUI(isDark);
-  browser.storage.local.set({ theme: isDark ? 'dark' : 'light' });
-};
+const refreshTimerLabels = async () => {
+  // If user is currently typing, we freeze UI updates to avoid visual jitter
+  if (userIsTyping) return;
 
-const updateTimers = () => {
-  const d = q('#d').value;
-  const u = q('#u').value;
-  const limit = ms(isValid(d) ? parseFloat(d) : 15, u || 'm');
+  const state = await browser.storage.local.get(['timers', 'delay', 'unit', 'pin', 'isUpdating']);
+  const inputValue = $('#d').value;
+  const unitValue = $('#u').value;
+  const pinPref = $('#p').checked;
+
+  const currentLimitMs = toMs(isInputValid(inputValue) ? parseFloat(inputValue) : 15, unitValue);
   const now = Date.now();
+  const customTimers = state.timers || {};
+
+  let anyTabWasDiscarded = false;
+  const timerElements = document.querySelectorAll('.timer');
   
-  document.querySelectorAll('.timer').forEach(el => {
-    const last = parseInt(el.dataset.lastAccessed);
+  for (const el of timerElements) {
+    const tabId = parseInt(el.dataset.id);
+    const lastAccessed = parseInt(el.dataset.lastAccessed);
     const isActive = el.dataset.active === "true";
-    const isReallyAudible = el.dataset.audible === "true";
+    const isAudible = el.dataset.audible === "true";
     const isDiscarded = el.dataset.discarded === "true";
+    const isPinned = el.dataset.pinned === "true";
 
-    let text = "";
+    let labelText = "";
+    
     if (isDiscarded) {
-      text = '[soon]';
-    } else if (!isNaN(last) && !isActive && !isReallyAudible) {
-      const remaining = limit - (now - last);
-      text = `[${formatTime(remaining)}]`;
+      labelText = '[soon]';
+    } else if (!isNaN(lastAccessed) && !isActive && !isAudible) {
+      let remainingMs;
+      
+      // Use custom timer if it exists (set during a reset), otherwise fallback to inactivity time
+      if (customTimers[tabId]) {
+        remainingMs = customTimers[tabId] - now;
+      } else {
+        remainingMs = currentLimitMs - (now - lastAccessed);
+      }
+
+      // Check for automatic discard (if not currently updating settings)
+      if (remainingMs <= 0 && !state.isUpdating) {
+        if (!isPinned || pinPref) {
+          try {
+            await browser.tabs.discard(tabId);
+            if (customTimers[tabId]) {
+              delete customTimers[tabId];
+              await browser.storage.local.set({ timers: customTimers });
+            }
+            anyTabWasDiscarded = true;
+          } catch(e) {}
+        }
+      }
+      labelText = `[${formatDuration(remainingMs)}]`;
     }
 
-    el.innerText = text;
-    // Hide entirely if no content to show, but allow hover to show it via CSS
-    if (!text) {
-      el.style.display = 'none';
-    } else {
-      // Revert to CSS controlled display (none by default, inline on hover)
-      el.style.display = ''; 
-    }
-  });
+    el.innerText = labelText;
+    el.style.display = labelText ? '' : 'none';
+  }
+  
+  if (anyTabWasDiscarded) populateTabsList();
 };
 
-const updateUI = async () => {
-  const s = await browser.storage.local.get();
-  const p = !!s.pin;
+/**
+ * Renders the full list of tabs in the popup UI.
+ */
+const populateTabsList = async () => {
+  const state = await browser.storage.local.get();
+  const allowPinned = $('#p').checked;
   const allTabs = await browser.tabs.query({});
-  const list = q('#list');
-  list.innerHTML = ''; 
+  const listContainer = $('#list');
   
-  // Filter for "Manageable" tabs only
-  const realTabs = allTabs.filter(t => {
-    const url = t.url || "";
+  listContainer.innerHTML = ''; 
+  
+  // Filter out system pages (except blank ones)
+  const relevantTabs = allTabs.filter(tab => {
+    const url = tab.url || "";
     const isSystem = url.startsWith('about:') || url.startsWith('chrome:');
-    const isBlank = url === 'about:newtab' || url === 'about:blank' || url === 'about:home' || url === '';
-    const isSystemPage = isSystem && !isBlank;
-    
-    if (isSystemPage) return false;
-    if (!p && t.pinned) return false;
-    
-    return true;
+    const isBlank = ['about:newtab', 'about:blank', 'about:home', ''].includes(url);
+    if (isSystem && !isBlank) return false;
+    return !(!allowPinned && tab.pinned);
+
   });
 
-  // Display all loaded manageable tabs (Active, Audible, and Targets)
-  const visibleTabs = realTabs.filter(t => !t.discarded);
+  const activeTabsCount = relevantTabs.filter(t => !t.discarded).length;
+  $('#s').innerText = `${activeTabsCount} / ${relevantTabs.length}`;
 
-  const loadedRealTabs = visibleTabs.length;
-  q('#s').innerText = `${loadedRealTabs} / ${realTabs.length}`;
-
-  visibleTabs.forEach(t => {
-    const isReallyAudible = t.audible && !t.mutedInfo?.muted;
+  relevantTabs.filter(t => !t.discarded).forEach(tab => {
+    const isReallyAudible = tab.audible && !tab.mutedInfo?.muted;
     const item = document.createElement('div');
     item.className = 'tab-item';
     
-    const title = document.createElement('span');
-    title.className = 'tab-title';
+    const titleContainer = document.createElement('span');
+    titleContainer.className = 'tab-title';
     
-    const text = document.createElement('span');
-    text.className = 'tab-text';
-    text.innerText = t.title;
+    const titleText = document.createElement('span');
+    titleText.className = 'tab-text';
+    titleText.innerText = tab.title;
+    if (tab.active) titleText.style.fontWeight = '700';
+
+    const timerLabel = document.createElement('span');
+    timerLabel.className = 'timer';
+    timerLabel.dataset.id = tab.id;
+    timerLabel.dataset.lastAccessed = tab.lastAccessed;
+    timerLabel.dataset.active = tab.active;
+    timerLabel.dataset.audible = isReallyAudible;
+    timerLabel.dataset.discarded = false;
+    timerLabel.dataset.pinned = tab.pinned;
+
+    titleContainer.append(titleText, timerLabel);
     
-    // Highlight active tab
-    if (t.active) {
-      text.style.fontWeight = '700';
-    }
-
-    const timer = document.createElement('span');
-    timer.className = 'timer';
-    timer.dataset.lastAccessed = t.lastAccessed;
-    timer.dataset.active = t.active;
-    timer.dataset.audible = isReallyAudible;
-    timer.dataset.discarded = false;
-
-    title.append(text, timer);
-
     if (isReallyAudible) {
-      const speaker = document.createElement('span');
-      speaker.innerText = ' (Sound)';
-      speaker.style.fontSize = '8px';
-      speaker.style.marginLeft = '4px';
-      title.append(speaker);
+      const soundIcon = document.createElement('span');
+      soundIcon.innerText = ' (Sound)';
+      soundIcon.style.fontSize = '8px';
+      soundIcon.style.marginLeft = '4px';
+      titleContainer.append(soundIcon);
     }
 
-    item.append(title);
+    item.append(titleContainer);
 
-    // Only show OFF button for non-active, non-audible tabs
-    if (!t.active && !isReallyAudible) {
-      const btn = document.createElement('button');
-      btn.className = 'status-btn';
-      btn.innerText = 'OFF';
-      btn.onclick = () => browser.tabs.discard(t.id).then(updateUI).catch(() => {});
-      item.append(btn);
+    // Add Discard button or "ACTIVE" indicator
+    if (!tab.active && !isReallyAudible) {
+      const discardBtn = document.createElement('button');
+      discardBtn.className = 'status-btn';
+      discardBtn.innerText = 'OFF';
+      discardBtn.onclick = () => browser.tabs.discard(tab.id).then(populateTabsList).catch(() => {});
+      item.append(discardBtn);
     } else {
-      const spacer = document.createElement('div');
-      spacer.style.minWidth = '45px';
-      // Optional: Add a small indicator for the active tab
-      if (t.active) {
-        spacer.innerText = 'ACTIVE';
-        spacer.style.fontSize = '8px';
-        spacer.style.textAlign = 'center';
-        spacer.style.opacity = '0.5';
-        spacer.style.fontWeight = '800';
+      const activeIndicator = document.createElement('div');
+      activeIndicator.style.minWidth = '45px';
+      if (tab.active) {
+        activeIndicator.innerText = 'ACTIVE';
+        activeIndicator.style.fontSize = '8px';
+        activeIndicator.style.textAlign = 'center';
+        activeIndicator.style.opacity = '0.5';
+        activeIndicator.style.fontWeight = '800';
       }
-      item.append(spacer);
+      item.append(activeIndicator);
     }
-
-    list.appendChild(item);
+    listContainer.appendChild(item);
   });
-  updateTimers();
-};
-
-const isValid = (val) => {
-  const n = parseFloat(val);
-  return !isNaN(n) && n > 0 && /^\d*\.?\d*$/.test(val);
-};
-
-const updateInputWidth = () => {
-  const input = q('#d');
-  const length = input.value.length || 1;
-  input.style.width = `${Math.min(length + 1, 10)}ch`;
-  input.classList.toggle('invalid', !isValid(input.value) && input.value !== "");
-};
-
-const save = () => {
-  const dVal = q('#d').value;
-  updateInputWidth();
-  const btn = q('#a');
-  clearTimeout(saveTimeout);
   
-  if (!isValid(dVal)) {
-    btn.innerText = "✖ Invalid";
-    btn.style.background = "var(--danger)";
-    saveTimeout = setTimeout(() => {
-      btn.innerText = "Discard Others";
-      btn.style.background = "";
+  refreshTimerLabels();
+};
+
+
+const handleInputVisualsAndShortcuts = () => {
+  const input = $('#d');
+  let value = input.value;
+  
+  // Shortcut logic: "15s" -> 15 and sets unit to 'sec'
+  const shortcutMatch = value.match(/^(\d*\.?\d*)(s|m|h)$/i);
+  if (shortcutMatch) {
+    input.value = shortcutMatch[1];
+    $('#u').value = shortcutMatch[2].toLowerCase();
+    value = shortcutMatch[1];
+  }
+
+  const charCount = value.length || 1;
+  input.style.width = `${Math.min(charCount + 1, 10)}ch`;
+  input.classList.toggle('invalid', !isInputValid(value) && value !== "");
+};
+
+
+const saveSettings = async () => {
+  const delayStr = $('#d').value;
+  handleInputVisualsAndShortcuts();
+  const mainBtn = $('#a');
+  
+  clearTimeout(saveVisualFeedbackTimeout);
+  
+  if (!isInputValid(delayStr)) {
+    mainBtn.innerText = "✖ Invalid";
+    mainBtn.style.background = "var(--danger)";
+    saveVisualFeedbackTimeout = setTimeout(() => {
+      mainBtn.innerText = "Discard Others";
+      mainBtn.style.background = "";
     }, 1000);
     return;
   }
 
-  browser.storage.local.set({delay: parseFloat(dVal), unit: q('#u').value, pin: q('#p').checked});
-  btn.innerText = "✓ Saved";
-  btn.style.background = "var(--accent)";
-  saveTimeout = setTimeout(() => {
-    btn.innerText = "Discard Others";
-    btn.style.background = "";
-    updateUI();
+  const now = Date.now();
+  const delayValue = parseFloat(delayStr);
+  const unitValue = $('#u').value;
+  const pinPref = $('#p').checked;
+  const newLimitMs = toMs(delayValue, unitValue);
+  
+  const allTabs = await browser.tabs.query({});
+  const storedData = await browser.storage.local.get('timers');
+  const customTimers = storedData.timers || {};
+
+  // RESET LOGIC: All eligible tabs get the full new duration starting from now
+  for (const tab of allTabs) {
+    if (!tab.active && !tab.discarded) {
+      customTimers[tab.id] = now + newLimitMs;
+    }
+  }
+
+  await browser.storage.local.set({
+    delay: delayValue, 
+    unit: unitValue, 
+    pin: pinPref,
+    timers: customTimers,
+    isUpdating: false 
+  });
+
+  mainBtn.innerText = "✓ Saved";
+  mainBtn.style.background = "var(--accent)";
+  saveVisualFeedbackTimeout = setTimeout(() => {
+    mainBtn.innerText = "Discard Others";
+    mainBtn.style.background = "";
+    populateTabsList();
   }, 500);
 };
 
-['#d','#u','#p'].forEach(s => q(s).onchange = save);
-q('#d').oninput = updateInputWidth;
+// --- EVENT LISTENERS ---
 
-q('#a').onclick = async () => {
-  const s = await browser.storage.local.get();
-  const tabs = await browser.tabs.query({active: false, audible: false, discarded: false});
-  tabs.forEach(t => {
-    const url = t.url || "";
-    const isAbout = url.startsWith('about:');
-    if (!isAbout && (s.pin || !t.pinned)) browser.tabs.discard(t.id);
-  });
-  setTimeout(updateUI, 300);
+$('#theme-toggle').onchange = (e) => {
+  const isDark = e.target.checked;
+  updateTheme(isDark);
+  browser.storage.local.set({ theme: isDark ? 'dark' : 'light' });
 };
 
-browser.storage.local.get().then(s => {
-  q('#d').value = s.delay || 15;
-  q('#u').value = s.unit || 'm';
-  q('#p').checked = !!s.pin;
-  updateInputWidth();
-  
-  if (s.theme) {
-    updateThemeUI(s.theme === 'dark');
-  } else {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    updateThemeUI(prefersDark);
-  }
-  
-  updateUI();
+['#u','#p'].forEach(selector => $(selector).onchange = () => {
+  browser.storage.local.set({ isUpdating: true }).then(saveSettings);
 });
 
-setInterval(updateTimers, 1000);
+const delayInput = $('#d');
+
+delayInput.onfocus = () => { 
+  userIsTyping = true; 
+  browser.storage.local.set({ isUpdating: true }); 
+};
+
+delayInput.onblur = () => { 
+  userIsTyping = false; 
+  saveSettings(); 
+};
+
+delayInput.oninput = () => {
+  userIsTyping = true;
+  browser.storage.local.set({ isUpdating: true });
+  handleInputVisualsAndShortcuts();
+};
+
+// Global discard button
+$('#a').onclick = async () => {
+  const settings = await browser.storage.local.get();
+  const targets = await browser.tabs.query({ active: false, audible: false, discarded: false });
+  
+  targets.forEach(tab => {
+    const isSystem = tab.url.startsWith('about:');
+    if (!isSystem && (settings.pin || !tab.pinned)) {
+      browser.tabs.discard(tab.id);
+    }
+  });
+  setTimeout(populateTabsList, 300);
+};
+
+// --- INITIALIZATION ---
+
+browser.storage.local.get().then(state => {
+  $('#d').value = state.delay || 15;
+  $('#u').value = state.unit || 'm';
+  $('#p').checked = !!state.pin;
+  
+  handleInputVisualsAndShortcuts();
+  
+  if (state.theme) {
+    updateTheme(state.theme === 'dark');
+  } else {
+    updateTheme(window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  
+  populateTabsList();
+});
+
+setInterval(refreshTimerLabels, 1000);
