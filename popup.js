@@ -34,7 +34,6 @@ const updateTheme = (isDark) => {
 };
 
 const refreshTimerLabels = async () => {
-  // If user is currently typing, we freeze UI updates to avoid visual jitter
   if (userIsTyping) return;
 
   const state = await browser.storage.local.get(['timers', 'delay', 'unit', 'pin', 'isUpdating']);
@@ -64,14 +63,12 @@ const refreshTimerLabels = async () => {
     } else if (!isNaN(lastAccessed) && !isActive && !isAudible) {
       let remainingMs;
       
-      // Use custom timer if it exists (set during a reset), otherwise fallback to inactivity time
       if (customTimers[tabId]) {
         remainingMs = customTimers[tabId] - now;
       } else {
         remainingMs = currentLimitMs - (now - lastAccessed);
       }
 
-      // Check for automatic discard (if not currently updating settings)
       if (remainingMs <= 0 && !state.isUpdating) {
         if (!isPinned || pinPref) {
           try {
@@ -94,9 +91,6 @@ const refreshTimerLabels = async () => {
   if (anyTabWasDiscarded) populateTabsList();
 };
 
-/**
- * Renders the full list of tabs in the popup UI.
- */
 const populateTabsList = async () => {
   const state = await browser.storage.local.get();
   const allowPinned = $('#p').checked;
@@ -105,14 +99,12 @@ const populateTabsList = async () => {
   
   listContainer.innerHTML = ''; 
   
-  // Filter out system pages (except blank ones)
   const relevantTabs = allTabs.filter(tab => {
     const url = tab.url || "";
     const isSystem = url.startsWith('about:') || url.startsWith('chrome:');
     const isBlank = ['about:newtab', 'about:blank', 'about:home', ''].includes(url);
     if (isSystem && !isBlank) return false;
     return !(!allowPinned && tab.pinned);
-
   });
 
   const activeTabsCount = relevantTabs.filter(t => !t.discarded).length;
@@ -152,7 +144,6 @@ const populateTabsList = async () => {
 
     item.append(titleContainer);
 
-    // Add Discard button or "ACTIVE" indicator
     if (!tab.active && !isReallyAudible) {
       const discardBtn = document.createElement('button');
       discardBtn.className = 'status-btn';
@@ -177,12 +168,10 @@ const populateTabsList = async () => {
   refreshTimerLabels();
 };
 
-
 const handleInputVisualsAndShortcuts = () => {
   const input = $('#d');
   let value = input.value;
   
-  // Shortcut logic: "15s" -> 15 and sets unit to 'sec'
   const shortcutMatch = value.match(/^(\d*\.?\d*)(s|m|h)$/i);
   if (shortcutMatch) {
     input.value = shortcutMatch[1];
@@ -194,7 +183,6 @@ const handleInputVisualsAndShortcuts = () => {
   input.style.width = `${Math.min(charCount + 1, 10)}ch`;
   input.classList.toggle('invalid', !isInputValid(value) && value !== "");
 };
-
 
 const saveSettings = async () => {
   const delayStr = $('#d').value;
@@ -217,16 +205,34 @@ const saveSettings = async () => {
   const delayValue = parseFloat(delayStr);
   const unitValue = $('#u').value;
   const pinPref = $('#p').checked;
+  const resetAllPref = $('#resetAll').checked;
   const newLimitMs = toMs(delayValue, unitValue);
   
   const allTabs = await browser.tabs.query({});
-  const storedData = await browser.storage.local.get('timers');
-  const customTimers = storedData.timers || {};
+  const state = await browser.storage.local.get(['timers', 'delay', 'unit']);
+  
+  const oldLimitMs = toMs(state.delay || 15, state.unit || 'm');
+  const customTimers = state.timers || {};
 
-  // RESET LOGIC: All eligible tabs get the full new duration starting from now
   for (const tab of allTabs) {
     if (!tab.active && !tab.discarded) {
-      customTimers[tab.id] = now + newLimitMs;
+      let currentRemainingMs;
+      if (customTimers[tab.id]) {
+        currentRemainingMs = customTimers[tab.id] - now;
+      } else {
+        currentRemainingMs = oldLimitMs - (now - tab.lastAccessed);
+      }
+
+      let finalRemainingMs;
+      if (resetAllPref) {
+        finalRemainingMs = newLimitMs;
+      } else {
+        // Logique demandée : si on réduit le temps, on reset au nouveau max. 
+        // Si on l'augmente, on garde le temps restant actuel (qui est forcément < au nouveau max).
+        finalRemainingMs = Math.min(currentRemainingMs, newLimitMs);
+      }
+
+      customTimers[tab.id] = now + Math.max(0, finalRemainingMs);
     }
   }
 
@@ -234,6 +240,7 @@ const saveSettings = async () => {
     delay: delayValue, 
     unit: unitValue, 
     pin: pinPref,
+    resetAll: resetAllPref,
     timers: customTimers,
     isUpdating: false 
   });
@@ -255,7 +262,7 @@ $('#theme-toggle').onchange = (e) => {
   browser.storage.local.set({ theme: isDark ? 'dark' : 'light' });
 };
 
-['#u','#p'].forEach(selector => $(selector).onchange = () => {
+['#u','#p','#resetAll'].forEach(selector => $(selector).onchange = () => {
   browser.storage.local.set({ isUpdating: true }).then(saveSettings);
 });
 
@@ -277,7 +284,6 @@ delayInput.oninput = () => {
   handleInputVisualsAndShortcuts();
 };
 
-// Global discard button
 $('#a').onclick = async () => {
   const settings = await browser.storage.local.get();
   const targets = await browser.tabs.query({ active: false, audible: false, discarded: false });
@@ -297,6 +303,7 @@ browser.storage.local.get().then(state => {
   $('#d').value = state.delay || 15;
   $('#u').value = state.unit || 'm';
   $('#p').checked = !!state.pin;
+  $('#resetAll').checked = state.resetAll !== undefined ? !!state.resetAll : true;
   
   handleInputVisualsAndShortcuts();
   
