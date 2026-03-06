@@ -30,9 +30,9 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "merlo.johan@icloud.com",
-      "update_url": "https://hunderjd.github.io/LiteNoodle/update.json",
       "data_collection_permissions": {
         "consent": false,
+        "required": ["none"],
         "description": "Lite Noodle does not collect or transmit any user data."
       }
     }

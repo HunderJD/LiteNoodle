@@ -1,0 +1,1 @@
+This is a test fort egsitring my addons
