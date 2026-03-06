@@ -299,6 +299,10 @@ $('#a').onclick = async () => {
 
 // --- INITIALIZATION ---
 
+window.addEventListener('unload', () => {
+  browser.storage.local.set({ isUpdating: false });
+});
+
 browser.storage.local.get().then(state => {
   $('#d').value = state.delay || 15;
   $('#u').value = state.unit || 'm';

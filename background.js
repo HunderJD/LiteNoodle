@@ -1,18 +1,20 @@
-
 const TIME_UNITS = {
-  s: 1000,       // Second
-  m: 60 * 1000,  // Minute
-  h: 3600 * 1000 // Hour
+  s: 1000,
+  m: 60000,
+  h: 3600000
 };
-
 
 const convertToMs = (value, unit) => value * (TIME_UNITS[unit] || TIME_UNITS.m);
 
+let nextCheckTimeout = null;
 
 const checkInactiveTabs = async () => {
+  // Clear any pending scheduled check
+  if (nextCheckTimeout) clearTimeout(nextCheckTimeout);
+
   const settings = await browser.storage.local.get(['delay', 'unit', 'pin', 'timers', 'isUpdating']);
   
-  // SECURITY: Do nothing if the user is currently editing settings in the popup
+  // If user is editing, we wait
   if (settings.isUpdating) return;
 
   const delayLimit = settings.delay || 15;
@@ -23,66 +25,78 @@ const checkInactiveTabs = async () => {
   const globalThresholdMs = convertToMs(delayLimit, unit);
   const now = Date.now();
   
-  // We only target background tabs that are not audible and not already discarded
   const tabs = await browser.tabs.query({ active: false, discarded: false, audible: false });
   
+  let timersUpdated = false;
+  let soonestCheckMs = Infinity;
+
   for (const tab of tabs) {
     const url = tab.url || "";
     const isSystemPage = url.startsWith('about:') || url.startsWith('chrome:');
-    const isBlankPage = url === 'about:newtab' || url === 'about:blank' || url === 'about:home' || url === '';
+    const isBlankPage = ['about:newtab', 'about:blank', 'about:home', ''].includes(url);
     
-    // System pages cannot be discarded unless they are blank/newtab
     const isEligible = (!isSystemPage || isBlankPage) && (allowPinned || !tab.pinned);
     
     if (isEligible) {
       let remainingMs;
-      
-      // If a specific timer was set (e.g., after a settings update), use it
       if (customTimers[tab.id]) {
         remainingMs = customTimers[tab.id] - now;
       } else {
-        // Otherwise, calculate based on the last time the tab was accessed
         remainingMs = globalThresholdMs - (now - tab.lastAccessed);
       }
 
-      // If time is up, discard the tab
       if (remainingMs <= 0) {
-        browser.tabs.discard(tab.id).catch(() => {});
-        
-        // Clean up the custom timer if it existed
-        if (customTimers[tab.id]) {
-          delete customTimers[tab.id];
-          await browser.storage.local.set({ timers: customTimers });
+        try {
+          await browser.tabs.discard(tab.id);
+          if (customTimers[tab.id]) {
+            delete customTimers[tab.id];
+            timersUpdated = true;
+          }
+        } catch (e) {}
+      } else {
+        // Track the smallest remaining time to schedule the next check
+        if (remainingMs < soonestCheckMs) {
+          soonestCheckMs = remainingMs;
         }
       }
     }
   }
+
+  if (timersUpdated) {
+    await browser.storage.local.set({ timers: customTimers });
+  }
+
+  // Schedule the next check if there's a tab that will expire soon
+  // This bypasses the 1-minute alarm limit for short durations
+  if (soonestCheckMs !== Infinity) {
+    // Add a small buffer (500ms) to ensure the time has actually passed
+    nextCheckTimeout = setTimeout(checkInactiveTabs, soonestCheckMs + 500);
+  }
 };
 
-/**
- * Reset custom timers when a tab becomes active.
- */
-browser.tabs.onActivated.addListener(async (activeInfo) => {
-  const data = await browser.storage.local.get('timers');
-  if (data.timers && data.timers[activeInfo.tabId]) {
-    delete data.timers[activeInfo.tabId];
-    await browser.storage.local.set({ timers: data.timers });
-  }
+// Listeners for reactivity
+browser.tabs.onActivated.addListener(checkInactiveTabs);
+browser.tabs.onUpdated.addListener((id, change) => {
+  if (change.status === 'complete') checkInactiveTabs();
 });
 
-// Setup periodic check
+// Periodic fallback (minimum 1 minute)
 browser.alarms.create("checkTabsAlarm", { periodInMinutes: 1 });
-browser.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "checkTabsAlarm") checkInactiveTabs();
+browser.alarms.onAlarm.addListener(checkInactiveTabs);
+
+// Storage listener: if settings change, re-check immediately
+browser.storage.onChanged.addListener((changes) => {
+  if (changes.delay || changes.unit || changes.timers || changes.isUpdating) {
+    checkInactiveTabs();
+  }
 });
 
 // Initial run
 checkInactiveTabs();
 
-// install config when install extension
+// Install logic
 browser.runtime.onInstalled.addListener(details => {
   if (details.reason === "install") {
     browser.tabs.create({ url: "install.html" });
   }
-  browser.alarms.create("checkTabsAlarm", { periodInMinutes: 1 });
 });
