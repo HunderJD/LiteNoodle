@@ -1,4 +1,4 @@
-// --- HELPER FUNCTIONS ---
+// --- 1. CONSTANTS & HELPERS ---
 
 const $ = selector => document.querySelector(selector);
 
@@ -20,12 +20,80 @@ const isInputValid = (val) => {
   return !isNaN(num) && num > 0 && /^\d*\.?\d*$/.test(val);
 };
 
-// --- STATE MANAGEMENT ---
+const getDomain = (url) => {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.replace(/^www\./, '');
+  } catch (e) {
+    return "";
+  }
+};
+
+// --- 2. STATE MANAGEMENT ---
 
 let saveVisualFeedbackTimeout;
 let userIsTyping = false;
 
-// --- CORE FUNCTIONS ---
+const getSettings = () => browser.storage.local.get([
+  'timers', 'delay', 'unit', 'pin', 'discardNewTabs', 'isUpdating', 'whitelist', 'theme', 'resetAll'
+]);
+
+const saveSettings = async () => {
+  const delayStr = $('#d').value;
+  updateInputVisuals();
+  
+  const mainBtn = $('#a');
+  clearTimeout(saveVisualFeedbackTimeout);
+  
+  if (!isInputValid(delayStr)) {
+    showButtonFeedback(mainBtn, "✖ Invalid", "var(--danger)");
+    return;
+  }
+
+  const state = await getSettings();
+  const now = Date.now();
+  const delayValue = parseFloat(delayStr);
+  const unitValue = $('#u').value;
+  const newLimitMs = toMs(delayValue, unitValue);
+  const oldLimitMs = toMs(state.delay || 15, state.unit || 'm');
+  const customTimers = state.timers || {};
+  const resetAllPref = $('#resetAll').checked;
+
+  // Update all active tab timers based on new limit
+  const allTabs = await browser.tabs.query({});
+  for (const tab of allTabs) {
+    if (!tab.active && !tab.discarded) {
+      let currentRemainingMs = customTimers[tab.id] ? (customTimers[tab.id] - now) : (oldLimitMs - (now - tab.lastAccessed));
+      let finalRemainingMs = resetAllPref ? newLimitMs : Math.min(currentRemainingMs, newLimitMs);
+      customTimers[tab.id] = now + Math.max(0, finalRemainingMs);
+    }
+  }
+
+  await browser.storage.local.set({
+    delay: delayValue, 
+    unit: unitValue, 
+    pin: $('#p').checked,
+    discardNewTabs: $('#discardNewTabs').checked,
+    resetAll: resetAllPref,
+    timers: customTimers,
+    isUpdating: false 
+  });
+
+  showButtonFeedback(mainBtn, "✓ Saved", "var(--accent)");
+  setTimeout(populateTabsList, 500);
+};
+
+const showButtonFeedback = (btn, text, color) => {
+  const originalText = "Discard Others";
+  btn.innerText = text;
+  btn.style.background = color;
+  saveVisualFeedbackTimeout = setTimeout(() => {
+    btn.innerText = originalText;
+    btn.style.background = "";
+  }, 1000);
+};
+
+// --- 3. UI RENDERING ---
 
 const updateTheme = (isDark) => {
   document.body.classList.toggle('dark', isDark);
@@ -33,45 +101,51 @@ const updateTheme = (isDark) => {
   $('.brand-logo img').src = isDark ? 'icon-dark.svg' : 'icon-light.svg';
 };
 
+const updateInputVisuals = () => {
+  const input = $('#d');
+  let value = input.value;
+  
+  // Handle unit shortcuts (e.g. "10s")
+  const shortcutMatch = value.match(/^(\d*\.?\d*)(s|m|h)$/i);
+  if (shortcutMatch) {
+    input.value = shortcutMatch[1];
+    $('#u').value = shortcutMatch[2].toLowerCase();
+    value = shortcutMatch[1];
+  }
+
+  input.style.width = `${Math.min((value.length || 1) + 1, 10)}ch`;
+  input.classList.toggle('invalid', !isInputValid(value) && value !== "");
+};
+
 const refreshTimerLabels = async () => {
   if (userIsTyping) return;
 
-  const state = await browser.storage.local.get(['timers', 'delay', 'unit', 'pin', 'discardNewTabs', 'isUpdating']);
-  const inputValue = $('#d').value;
-  const unitValue = $('#u').value;
-  const pinPref = $('#p').checked;
-  const discardNewTabsPref = $('#discardNewTabs').checked;
-
-  const currentLimitMs = toMs(isInputValid(inputValue) ? parseFloat(inputValue) : 15, unitValue);
+  const state = await getSettings();
+  const currentLimitMs = toMs(isInputValid($('#d').value) ? parseFloat($('#d').value) : 15, $('#u').value);
   const now = Date.now();
   const customTimers = state.timers || {};
+  const whitelist = state.whitelist || [];
 
   let anyTabWasDiscarded = false;
-  const timerElements = document.querySelectorAll('.timer');
   
-  for (const el of timerElements) {
+  document.querySelectorAll('.timer').forEach(async (el) => {
     const tabId = parseInt(el.dataset.id);
-    const lastAccessed = parseInt(el.dataset.lastAccessed);
-    const isActive = el.dataset.active === "true";
-    const isAudible = el.dataset.audible === "true";
-    const isDiscarded = el.dataset.discarded === "true";
-    const isPinned = el.dataset.pinned === "true";
+    const domain = getDomain(el.dataset.url || "");
 
-    let labelText = "";
-    
-    if (isDiscarded) {
-      labelText = '[soon]';
-    } else if (!isNaN(lastAccessed) && !isActive && !isAudible) {
-      let remainingMs;
-      
-      if (customTimers[tabId]) {
-        remainingMs = customTimers[tabId] - now;
-      } else {
-        remainingMs = currentLimitMs - (now - lastAccessed);
-      }
+    if (whitelist.includes(domain)) {
+      el.style.display = 'none';
+      return;
+    }
+
+    if (el.dataset.discarded === "true") {
+      el.innerText = '[soon]';
+      el.style.display = '';
+    } else if (el.dataset.active !== "true" && el.dataset.audible !== "true") {
+      const lastAccessed = parseInt(el.dataset.lastAccessed);
+      let remainingMs = customTimers[tabId] ? (customTimers[tabId] - now) : (currentLimitMs - (now - lastAccessed));
 
       if (remainingMs <= 0 && !state.isUpdating) {
-        if (!isPinned || pinPref) {
+        if (!state.pin || el.dataset.pinned === "true") {
           try {
             await browser.tabs.discard(tabId);
             if (customTimers[tabId]) {
@@ -82,186 +156,155 @@ const refreshTimerLabels = async () => {
           } catch(e) {}
         }
       }
-      labelText = `[${formatDuration(remainingMs)}]`;
+      el.innerText = `[${formatDuration(remainingMs)}]`;
+      el.style.display = '';
+    } else {
+      el.style.display = 'none';
     }
-
-    el.innerText = labelText;
-    el.style.display = labelText ? '' : 'none';
-  }
+  });
   
   if (anyTabWasDiscarded) populateTabsList();
 };
 
-const populateTabsList = async () => {
-  const state = await browser.storage.local.get();
-  const allowPinned = $('#p').checked;
-  const discardNewTabs = $('#discardNewTabs').checked;
-  const allTabs = await browser.tabs.query({});
-  const listContainer = $('#list');
-
-  listContainer.innerHTML = ''; 
+const renderTab = (tab, container, isWhitelisted) => {
+  const isReallyAudible = tab.audible && !tab.mutedInfo?.muted;
+  const item = document.createElement('div');
+  item.className = 'tab-item';
   
+  const titleContainer = document.createElement('span');
+  titleContainer.className = 'tab-title';
+  
+  const titleText = document.createElement('span');
+  titleText.className = 'tab-text';
+  titleText.innerText = tab.title;
+  if (tab.active) titleText.style.fontWeight = '700';
+
+  const timerLabel = document.createElement('span');
+  timerLabel.className = 'timer';
+  Object.assign(timerLabel.dataset, {
+    id: tab.id,
+    lastAccessed: tab.lastAccessed,
+    active: tab.active,
+    audible: isReallyAudible,
+    discarded: false,
+    pinned: tab.pinned,
+    url: tab.url
+  });
+
+  if (isWhitelisted) {
+    const checkMark = document.createElement('span');
+    checkMark.innerText = '✓ ';
+    checkMark.style.cssText = 'color: var(--accent); font-size: 10px; margin-right: 4px;';
+    checkMark.title = 'Whitelisted';
+    titleContainer.append(checkMark);
+  }
+
+  titleContainer.append(titleText, timerLabel);
+  
+  if (isReallyAudible) {
+    const soundIcon = document.createElement('span');
+    soundIcon.innerText = ' (Sound)';
+    soundIcon.style.cssText = 'font-size: 8px; margin-left: 4px;';
+    titleContainer.append(soundIcon);
+  }
+
+  item.append(titleContainer);
+
+  if (!tab.active && !isReallyAudible && !isWhitelisted) {
+    const discardBtn = document.createElement('button');
+    discardBtn.className = 'status-btn';
+    discardBtn.innerText = 'OFF';
+    discardBtn.onclick = () => browser.tabs.discard(tab.id).then(populateTabsList);
+    item.append(discardBtn);
+  } else {
+    const indicator = document.createElement('div');
+    indicator.style.cssText = 'min-width: 45px; font-size: 8px; text-align: center; font-weight: 800;';
+    if (tab.active) {
+      indicator.innerText = 'ACTIVE';
+      indicator.style.opacity = '0.5';
+    } else if (isWhitelisted) {
+      indicator.innerText = 'SAFE';
+      indicator.style.color = 'var(--accent)';
+    }
+    item.append(indicator);
+  }
+  container.appendChild(item);
+};
+
+const populateTabsList = async () => {
+  const state = await getSettings();
+  const allTabs = await browser.tabs.query({});
+  const whitelist = state.whitelist || [];
+  
+  const whitelistUI = $('#whitelist-list');
+  const whitelistedTabsUI = $('#whitelisted-tabs-list');
+  const activeTabsUI = $('#list');
+
+  [whitelistUI, whitelistedTabsUI, activeTabsUI].forEach(el => el.innerHTML = '');
+
+  // 1. Render Whitelist Domains
+  if (whitelist.length === 0) {
+    whitelistUI.innerHTML = '<div style="font-size: 10px; opacity: 0.5; padding: 4px;">No domains whitelisted</div>';
+  } else {
+    whitelist.forEach(domain => {
+      const item = document.createElement('div');
+      item.className = 'whitelist-item';
+      item.innerHTML = `<span>${domain}</span><span class="remove-whitelist" title="Remove">×</span>`;
+      item.querySelector('.remove-whitelist').onclick = () => removeFromWhitelist(domain);
+      whitelistUI.appendChild(item);
+    });
+  }
+  
+  // 2. Filter & Sort Tabs
   const relevantTabs = allTabs.filter(tab => {
     const url = tab.url || "";
     const isSystem = url.startsWith('about:') || url.startsWith('chrome:');
     const isBlank = ['about:newtab', 'about:blank', 'about:home', ''].includes(url);
-    
-    // Logic: exclude system pages UNLESS it's a blank page AND discardNewTabs is enabled
-    if (isSystem && (!isBlank || !discardNewTabs)) return false;
-    
-    return !(!allowPinned && tab.pinned);
+    if (isSystem && (!isBlank || !state.discardNewTabs)) return false;
+    return state.pin || !tab.pinned;
   });
 
   const activeTabsCount = relevantTabs.filter(t => !t.discarded).length;
   $('#s').innerText = `${activeTabsCount} / ${relevantTabs.length}`;
 
+  // 3. Render Tabs
   relevantTabs.filter(t => !t.discarded).forEach(tab => {
-    const isReallyAudible = tab.audible && !tab.mutedInfo?.muted;
-    const item = document.createElement('div');
-    item.className = 'tab-item';
-    
-    const titleContainer = document.createElement('span');
-    titleContainer.className = 'tab-title';
-    
-    const titleText = document.createElement('span');
-    titleText.className = 'tab-text';
-    titleText.innerText = tab.title;
-    if (tab.active) titleText.style.fontWeight = '700';
-
-    const timerLabel = document.createElement('span');
-    timerLabel.className = 'timer';
-    timerLabel.dataset.id = tab.id;
-    timerLabel.dataset.lastAccessed = tab.lastAccessed;
-    timerLabel.dataset.active = tab.active;
-    timerLabel.dataset.audible = isReallyAudible;
-    timerLabel.dataset.discarded = false;
-    timerLabel.dataset.pinned = tab.pinned;
-
-    titleContainer.append(titleText, timerLabel);
-    
-    if (isReallyAudible) {
-      const soundIcon = document.createElement('span');
-      soundIcon.innerText = ' (Sound)';
-      soundIcon.style.fontSize = '8px';
-      soundIcon.style.marginLeft = '4px';
-      titleContainer.append(soundIcon);
-    }
-
-    item.append(titleContainer);
-
-    if (!tab.active && !isReallyAudible) {
-      const discardBtn = document.createElement('button');
-      discardBtn.className = 'status-btn';
-      discardBtn.innerText = 'OFF';
-      discardBtn.onclick = () => browser.tabs.discard(tab.id).then(populateTabsList).catch(() => {});
-      item.append(discardBtn);
-    } else {
-      const activeIndicator = document.createElement('div');
-      activeIndicator.style.minWidth = '45px';
-      if (tab.active) {
-        activeIndicator.innerText = 'ACTIVE';
-        activeIndicator.style.fontSize = '8px';
-        activeIndicator.style.textAlign = 'center';
-        activeIndicator.style.opacity = '0.5';
-        activeIndicator.style.fontWeight = '800';
-      }
-      item.append(activeIndicator);
-    }
-    listContainer.appendChild(item);
+    const isWhitelisted = whitelist.includes(getDomain(tab.url));
+    renderTab(tab, isWhitelisted ? whitelistedTabsUI : activeTabsUI, isWhitelisted);
   });
+
+  const hasWhitelisted = whitelistedTabsUI.children.length > 0;
+  $('#whitelisted-tabs-header').style.display = hasWhitelisted ? '' : 'none';
+  whitelistedTabsUI.style.display = hasWhitelisted ? '' : 'none';
   
   refreshTimerLabels();
 };
 
-const handleInputVisualsAndShortcuts = () => {
-  const input = $('#d');
-  let value = input.value;
-  
-  const shortcutMatch = value.match(/^(\d*\.?\d*)(s|m|h)$/i);
-  if (shortcutMatch) {
-    input.value = shortcutMatch[1];
-    $('#u').value = shortcutMatch[2].toLowerCase();
-    value = shortcutMatch[1];
-  }
+// --- 4. ACTION FUNCTIONS ---
 
-  const charCount = value.length || 1;
-  input.style.width = `${Math.min(charCount + 1, 10)}ch`;
-  input.classList.toggle('invalid', !isInputValid(value) && value !== "");
-};
-
-const saveSettings = async () => {
-  const delayStr = $('#d').value;
-  handleInputVisualsAndShortcuts();
-  const mainBtn = $('#a');
-  
-  clearTimeout(saveVisualFeedbackTimeout);
-  
-  if (!isInputValid(delayStr)) {
-    mainBtn.innerText = "✖ Invalid";
-    mainBtn.style.background = "var(--danger)";
-    saveVisualFeedbackTimeout = setTimeout(() => {
-      mainBtn.innerText = "Discard Others";
-      mainBtn.style.background = "";
-    }, 1000);
-    return;
-  }
-
-  const now = Date.now();
-  const delayValue = parseFloat(delayStr);
-  const unitValue = $('#u').value;
-  const pinPref = $('#p').checked;
-  const discardNewTabsPref = $('#discardNewTabs').checked;
-  const resetAllPref = $('#resetAll').checked;
-  const newLimitMs = toMs(delayValue, unitValue);
-  
-  const allTabs = await browser.tabs.query({});
-  const state = await browser.storage.local.get(['timers', 'delay', 'unit']);
-  
-  const oldLimitMs = toMs(state.delay || 15, state.unit || 'm');
-  const customTimers = state.timers || {};
-
-  for (const tab of allTabs) {
-    if (!tab.active && !tab.discarded) {
-      let currentRemainingMs;
-      if (customTimers[tab.id]) {
-        currentRemainingMs = customTimers[tab.id] - now;
-      } else {
-        currentRemainingMs = oldLimitMs - (now - tab.lastAccessed);
-      }
-
-      let finalRemainingMs;
-      if (resetAllPref) {
-        finalRemainingMs = newLimitMs;
-      } else {
-        // Logique demandée : si on réduit le temps, on reset au nouveau max. 
-        // Si on l'augmente, on garde le temps restant actuel (qui est forcément < au nouveau max).
-        finalRemainingMs = Math.min(currentRemainingMs, newLimitMs);
-      }
-
-      customTimers[tab.id] = now + Math.max(0, finalRemainingMs);
-    }
-  }
-
-  await browser.storage.local.set({
-    delay: delayValue, 
-    unit: unitValue, 
-    pin: pinPref,
-    discardNewTabs: discardNewTabsPref,
-    resetAll: resetAllPref,
-    timers: customTimers,
-    isUpdating: false 
-  });
-
-  mainBtn.innerText = "✓ Saved";
-  mainBtn.style.background = "var(--accent)";
-  saveVisualFeedbackTimeout = setTimeout(() => {
-    mainBtn.innerText = "Discard Others";
-    mainBtn.style.background = "";
+const addToWhitelist = async (domain) => {
+  if (!domain) return;
+  const state = await browser.storage.local.get('whitelist');
+  const whitelist = state.whitelist || [];
+  if (!whitelist.includes(domain)) {
+    whitelist.push(domain);
+    await browser.storage.local.set({ whitelist });
     populateTabsList();
-  }, 500);
+  }
 };
 
-// --- EVENT LISTENERS ---
+const removeFromWhitelist = async (domain) => {
+  const state = await browser.storage.local.get('whitelist');
+  const whitelist = state.whitelist || [];
+  const index = whitelist.indexOf(domain);
+  if (index > -1) {
+    whitelist.splice(index, 1);
+    await browser.storage.local.set({ whitelist });
+    populateTabsList();
+  }
+};
+
+// --- 5. EVENT LISTENERS ---
 
 $('#theme-toggle').onchange = (e) => {
   const isDark = e.target.checked;
@@ -269,62 +312,62 @@ $('#theme-toggle').onchange = (e) => {
   browser.storage.local.set({ theme: isDark ? 'dark' : 'light' });
 };
 
-['#u','#p','#discardNewTabs','#resetAll'].forEach(selector => $(selector).onchange = () => {
+['#u','#p','#discardNewTabs','#resetAll'].forEach(sel => $(sel).onchange = () => {
   browser.storage.local.set({ isUpdating: true }).then(saveSettings);
 });
 
 const delayInput = $('#d');
-
-delayInput.onfocus = () => { 
-  userIsTyping = true; 
-  browser.storage.local.set({ isUpdating: true }); 
-};
-
-delayInput.onblur = () => { 
-  userIsTyping = false; 
-  saveSettings(); 
-};
-
-delayInput.oninput = () => {
-  userIsTyping = true;
-  browser.storage.local.set({ isUpdating: true });
-  handleInputVisualsAndShortcuts();
-};
+delayInput.onfocus = () => { userIsTyping = true; browser.storage.local.set({ isUpdating: true }); };
+delayInput.onblur = () => { userIsTyping = false; saveSettings(); };
+delayInput.oninput = () => { userIsTyping = true; browser.storage.local.set({ isUpdating: true }); updateInputVisuals(); };
 
 $('#a').onclick = async () => {
-  const settings = await browser.storage.local.get();
+  const state = await getSettings();
+  const whitelist = state.whitelist || [];
   const targets = await browser.tabs.query({ active: false, audible: false, discarded: false });
   
   targets.forEach(tab => {
-    const isSystem = tab.url.startsWith('about:');
-    if (!isSystem && (settings.pin || !tab.pinned)) {
-      browser.tabs.discard(tab.id);
+    const domain = getDomain(tab.url);
+    if (!tab.url.startsWith('about:') && !whitelist.includes(domain) && (state.pin || !tab.pinned)) {
+      browser.tabs.discard(tab.id).catch(() => {});
     }
   });
   setTimeout(populateTabsList, 300);
 };
 
-// --- INITIALIZATION ---
+$('#whitelist-current-btn').onclick = async () => {
+  const btn = $('#whitelist-current-btn');
+  try {
+    const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tabs[0]) {
+      const domain = getDomain(tabs[0].url);
+      if (domain) {
+        await addToWhitelist(domain);
+        const oldText = btn.innerText;
+        btn.innerText = `✓ Added ${domain}`;
+        btn.style.color = 'var(--accent)';
+        setTimeout(() => { btn.innerText = oldText; btn.style.color = ''; }, 1500);
+      }
+    }
+  } catch (err) {
+    btn.innerText = "✖ Error";
+    setTimeout(() => { btn.innerText = "ADD current tab to whitelist"; }, 1500);
+  }
+};
 
-window.addEventListener('unload', () => {
-  browser.storage.local.set({ isUpdating: false });
-});
+// --- 6. INITIALIZATION ---
 
-browser.storage.local.get().then(state => {
+window.addEventListener('unload', () => browser.storage.local.set({ isUpdating: false }));
+
+getSettings().then(state => {
   $('#d').value = state.delay || 15;
   $('#u').value = state.unit || 'm';
   $('#p').checked = !!state.pin;
   $('#discardNewTabs').checked = !!state.discardNewTabs;
   $('#resetAll').checked = state.resetAll !== undefined ? !!state.resetAll : true;
   
-  handleInputVisualsAndShortcuts();
-  
-  if (state.theme) {
-    updateTheme(state.theme === 'dark');
-  } else {
-    updateTheme(window.matchMedia('(prefers-color-scheme: dark)').matches);
-  }
-  
+  updateInputVisuals();
+  updateTheme(state.theme === 'dark' || (!state.theme && window.matchMedia('(prefers-color-scheme: dark)').matches));
   populateTabsList();
 });
 

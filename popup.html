@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <style>
@@ -9,16 +9,16 @@
       --text: #5d4037;
       --primary: #795548;
       --border: #d7ccc8;
-      --accent: #81c784; /* Sage green for saved */
-      --danger: #e57373; /* Red for errors */
+      --accent: #81c784; 
+      --danger: #e57373; 
       --switch-bg: #d7ccc8;
     }
 
     body.dark {
-      --bg: #1b1614; /* Deep Espresso */
+      --bg: #1b1614; 
       --card: #261f1c;
-      --text: #d7ccc8; /* Soft cream */
-      --primary: #a1887f; /* Mocha accent */
+      --text: #d7ccc8; 
+      --primary: #a1887f; 
       --border: #3e2723;
       --danger: #ef5350;
       --switch-bg: #3e2723;
@@ -124,7 +124,6 @@
       outline: none;
       text-align: center;
       transition: width 0.1s ease, color 0.2s, border-color 0.2s;
-      -moz-appearance: textfield;
     }
 
     body.dark .settings-group input {
@@ -141,7 +140,6 @@
       border-bottom-color: var(--danger) !important;
     }
 
-    /* Hide arrows Chrome, Safari, Edge, Opera */
     .settings-group input::-webkit-outer-spin-button,
     .settings-group input::-webkit-inner-spin-button {
       -webkit-appearance: none;
@@ -181,6 +179,18 @@
 
     .stats { font-size: 11px; margin-bottom: 10px; opacity: 0.7; font-weight: 600; }
 
+    .list-header {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 15px 0 5px 0;
+      opacity: 0.6;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
     .tab-list { 
       max-height: 150px; 
       overflow-y: auto; 
@@ -193,6 +203,7 @@
       align-items: center; 
       padding: 6px 4px; 
       border-radius: 4px;
+      position: relative;
     }
     .tab-item:hover { background: rgba(0,0,0,0.03); }
     body.dark .tab-item:hover { background: rgba(255,255,255,0.05); }
@@ -221,7 +232,45 @@
       background: var(--accent);
       color: white;
     }
+
+    .remove-whitelist {
+      cursor: pointer;
+      opacity: 0.5;
+      font-weight: bold;
+    }
+    .remove-whitelist:hover { opacity: 1; color: var(--danger); }
+
+    .whitelist-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 6px;
+      font-size: 11px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.02);
+      margin-bottom: 2px;
+    }
+    body.dark .whitelist-item { background: rgba(255,255,255,0.03); }
+
+    #whitelist-current-btn {
+      width: 100%;
+      margin-bottom: 8px;
+      font-size: 10px;
+      padding: 6px;
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      border-radius: 4px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    #whitelist-current-btn:hover {
+      background: var(--accent);
+      color: white;
+    }
   </style>
+  <title>Lite Noodle</title>
 </head>
 <body>
   <div class="container">
@@ -244,7 +293,7 @@
     <div class="settings-group">
       <div class="limit-wrapper">
         <span>Limit:</span>
-        <input id="d" type="text">
+        <input id="d" type="text" placeholder="15">
       </div>
       <select id="u">
         <option value="s">sec</option>
@@ -263,7 +312,7 @@
       <label for="discardNewTabs">Discard New Tab pages</label>
     </div>
 
-    <div class="checkbox-row" title="If checked, changing settings resets all timers. If unchecked, timers are only capped if you reduce the limit (keeps their current progress otherwise).">
+    <div class="checkbox-row">
       <input id="resetAll" type="checkbox">
       <label for="resetAll">Always reset timers on change</label>
     </div>
@@ -272,6 +321,20 @@
 
     <button id="a">Discard Others</button>
 
+    <div class="list-header">
+      <span>Whitelist</span>
+    </div>
+    
+    <button id="whitelist-current-btn">
+      ADD current tab to whitelist
+    </button>
+
+    <div id="whitelist-list"></div>
+
+    <div class="list-header" id="whitelisted-tabs-header">Whitelisted Tabs</div>
+    <div class="tab-list" id="whitelisted-tabs-list"></div>
+
+    <div class="list-header">Active Tabs</div>
     <div class="tab-list" id="list"></div>
   </div>
   <script src="popup.js"></script>
