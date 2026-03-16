@@ -36,10 +36,11 @@ const updateTheme = (isDark) => {
 const refreshTimerLabels = async () => {
   if (userIsTyping) return;
 
-  const state = await browser.storage.local.get(['timers', 'delay', 'unit', 'pin', 'isUpdating']);
+  const state = await browser.storage.local.get(['timers', 'delay', 'unit', 'pin', 'discardNewTabs', 'isUpdating']);
   const inputValue = $('#d').value;
   const unitValue = $('#u').value;
   const pinPref = $('#p').checked;
+  const discardNewTabsPref = $('#discardNewTabs').checked;
 
   const currentLimitMs = toMs(isInputValid(inputValue) ? parseFloat(inputValue) : 15, unitValue);
   const now = Date.now();
@@ -94,16 +95,20 @@ const refreshTimerLabels = async () => {
 const populateTabsList = async () => {
   const state = await browser.storage.local.get();
   const allowPinned = $('#p').checked;
+  const discardNewTabs = $('#discardNewTabs').checked;
   const allTabs = await browser.tabs.query({});
   const listContainer = $('#list');
-  
+
   listContainer.innerHTML = ''; 
   
   const relevantTabs = allTabs.filter(tab => {
     const url = tab.url || "";
     const isSystem = url.startsWith('about:') || url.startsWith('chrome:');
     const isBlank = ['about:newtab', 'about:blank', 'about:home', ''].includes(url);
-    if (isSystem && !isBlank) return false;
+    
+    // Logic: exclude system pages UNLESS it's a blank page AND discardNewTabs is enabled
+    if (isSystem && (!isBlank || !discardNewTabs)) return false;
+    
     return !(!allowPinned && tab.pinned);
   });
 
@@ -205,6 +210,7 @@ const saveSettings = async () => {
   const delayValue = parseFloat(delayStr);
   const unitValue = $('#u').value;
   const pinPref = $('#p').checked;
+  const discardNewTabsPref = $('#discardNewTabs').checked;
   const resetAllPref = $('#resetAll').checked;
   const newLimitMs = toMs(delayValue, unitValue);
   
@@ -240,6 +246,7 @@ const saveSettings = async () => {
     delay: delayValue, 
     unit: unitValue, 
     pin: pinPref,
+    discardNewTabs: discardNewTabsPref,
     resetAll: resetAllPref,
     timers: customTimers,
     isUpdating: false 
@@ -262,7 +269,7 @@ $('#theme-toggle').onchange = (e) => {
   browser.storage.local.set({ theme: isDark ? 'dark' : 'light' });
 };
 
-['#u','#p','#resetAll'].forEach(selector => $(selector).onchange = () => {
+['#u','#p','#discardNewTabs','#resetAll'].forEach(selector => $(selector).onchange = () => {
   browser.storage.local.set({ isUpdating: true }).then(saveSettings);
 });
 
@@ -307,6 +314,7 @@ browser.storage.local.get().then(state => {
   $('#d').value = state.delay || 15;
   $('#u').value = state.unit || 'm';
   $('#p').checked = !!state.pin;
+  $('#discardNewTabs').checked = !!state.discardNewTabs;
   $('#resetAll').checked = state.resetAll !== undefined ? !!state.resetAll : true;
   
   handleInputVisualsAndShortcuts();

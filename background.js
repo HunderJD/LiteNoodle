@@ -20,6 +20,7 @@ const checkInactiveTabs = async () => {
   const delayLimit = settings.delay || 15;
   const unit = settings.unit || 'm';
   const allowPinned = settings.pin || false;
+  const discardNewTabs = settings.discardNewTabs || false;
   const customTimers = settings.timers || {};
   
   const globalThresholdMs = convertToMs(delayLimit, unit);
@@ -34,9 +35,9 @@ const checkInactiveTabs = async () => {
     const url = tab.url || "";
     const isSystemPage = url.startsWith('about:') || url.startsWith('chrome:');
     const isBlankPage = ['about:newtab', 'about:blank', 'about:home', ''].includes(url);
-    
-    const isEligible = (!isSystemPage || isBlankPage) && (allowPinned || !tab.pinned);
-    
+
+    const isEligible = (!isSystemPage || (discardNewTabs && isBlankPage)) && (allowPinned || !tab.pinned);
+
     if (isEligible) {
       let remainingMs;
       if (customTimers[tab.id]) {
