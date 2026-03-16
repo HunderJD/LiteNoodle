@@ -6,13 +6,22 @@ const TIME_UNITS = {
 
 const convertToMs = (value, unit) => value * (TIME_UNITS[unit] || TIME_UNITS.m);
 
+const getDomain = (url) => {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.replace(/^www\./, '');
+  } catch (e) {
+    return "";
+  }
+};
+
 let nextCheckTimeout = null;
 
 const checkInactiveTabs = async () => {
   // Clear any pending scheduled check
   if (nextCheckTimeout) clearTimeout(nextCheckTimeout);
 
-  const settings = await browser.storage.local.get(['delay', 'unit', 'pin', 'timers', 'isUpdating']);
+  const settings = await browser.storage.local.get(['delay', 'unit', 'pin', 'timers', 'isUpdating', 'whitelist', 'discardNewTabs']);
   
   // If user is editing, we wait
   if (settings.isUpdating) return;
@@ -22,6 +31,7 @@ const checkInactiveTabs = async () => {
   const allowPinned = settings.pin || false;
   const discardNewTabs = settings.discardNewTabs || false;
   const customTimers = settings.timers || {};
+  const whitelist = settings.whitelist || [];
   
   const globalThresholdMs = convertToMs(delayLimit, unit);
   const now = Date.now();
@@ -35,6 +45,10 @@ const checkInactiveTabs = async () => {
     const url = tab.url || "";
     const isSystemPage = url.startsWith('about:') || url.startsWith('chrome:');
     const isBlankPage = ['about:newtab', 'about:blank', 'about:home', ''].includes(url);
+    const domain = getDomain(url);
+
+    // Whitelist check
+    if (whitelist.includes(domain)) continue;
 
     const isEligible = (!isSystemPage || (discardNewTabs && isBlankPage)) && (allowPinned || !tab.pinned);
 

@@ -20,6 +20,15 @@ const isInputValid = (val) => {
   return !isNaN(num) && num > 0 && /^\d*\.?\d*$/.test(val);
 };
 
+const getDomain = (url) => {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.replace(/^www\./, '');
+  } catch (e) {
+    return "";
+  }
+};
+
 // --- STATE MANAGEMENT ---
 
 let saveVisualFeedbackTimeout;
@@ -36,11 +45,11 @@ const updateTheme = (isDark) => {
 const refreshTimerLabels = async () => {
   if (userIsTyping) return;
 
-  const state = await browser.storage.local.get(['timers', 'delay', 'unit', 'pin', 'discardNewTabs', 'isUpdating']);
+  const state = await browser.storage.local.get(['timers', 'delay', 'unit', 'pin', 'discardNewTabs', 'isUpdating', 'whitelist']);
   const inputValue = $('#d').value;
   const unitValue = $('#u').value;
   const pinPref = $('#p').checked;
-  const discardNewTabsPref = $('#discardNewTabs').checked;
+  const whitelist = state.whitelist || [];
 
   const currentLimitMs = toMs(isInputValid(inputValue) ? parseFloat(inputValue) : 15, unitValue);
   const now = Date.now();
@@ -56,9 +65,18 @@ const refreshTimerLabels = async () => {
     const isAudible = el.dataset.audible === "true";
     const isDiscarded = el.dataset.discarded === "true";
     const isPinned = el.dataset.pinned === "true";
+    const url = el.dataset.url || "";
+    const domain = getDomain(url);
 
     let labelText = "";
     
+    // Skip whitelisted domains
+    if (whitelist.includes(domain)) {
+      el.innerText = "";
+      el.style.display = 'none';
+      continue;
+    }
+
     if (isDiscarded) {
       labelText = '[soon]';
     } else if (!isNaN(lastAccessed) && !isActive && !isAudible) {
@@ -92,21 +110,65 @@ const refreshTimerLabels = async () => {
   if (anyTabWasDiscarded) populateTabsList();
 };
 
+const addToWhitelist = async (domain) => {
+  if (!domain) return;
+  const state = await browser.storage.local.get('whitelist');
+  const whitelist = state.whitelist || [];
+  if (!whitelist.includes(domain)) {
+    whitelist.push(domain);
+    await browser.storage.local.set({ whitelist });
+    populateTabsList();
+  }
+};
+
+const removeFromWhitelist = async (domain) => {
+  const state = await browser.storage.local.get('whitelist');
+  const whitelist = state.whitelist || [];
+  const index = whitelist.indexOf(domain);
+  if (index > -1) {
+    whitelist.splice(index, 1);
+    await browser.storage.local.set({ whitelist });
+    populateTabsList();
+  }
+};
+
 const populateTabsList = async () => {
   const state = await browser.storage.local.get();
   const allowPinned = $('#p').checked;
   const discardNewTabs = $('#discardNewTabs').checked;
+  const whitelist = state.whitelist || [];
   const allTabs = await browser.tabs.query({});
-  const listContainer = $('#list');
+  
+  const whitelistContainer = $('#whitelist-list');
+  const whitelistedTabsList = $('#whitelisted-tabs-list');
+  const otherTabsList = $('#list');
+  const whitelistedHeader = $('#whitelisted-tabs-header');
 
-  listContainer.innerHTML = ''; 
+  whitelistContainer.innerHTML = ''; 
+  whitelistedTabsList.innerHTML = '';
+  otherTabsList.innerHTML = '';
+
+  // Render Whitelist Domains
+  if (whitelist.length === 0) {
+    whitelistContainer.innerHTML = '<div style="font-size: 10px; opacity: 0.5; padding: 4px;">No domains whitelisted</div>';
+  } else {
+    whitelist.forEach(domain => {
+      const item = document.createElement('div');
+      item.className = 'whitelist-item';
+      item.innerHTML = `
+        <span>${domain}</span>
+        <span class="remove-whitelist" title="Remove from whitelist">×</span>
+      `;
+      item.querySelector('.remove-whitelist').onclick = () => removeFromWhitelist(domain);
+      whitelistContainer.appendChild(item);
+    });
+  }
   
   const relevantTabs = allTabs.filter(tab => {
     const url = tab.url || "";
     const isSystem = url.startsWith('about:') || url.startsWith('chrome:');
     const isBlank = ['about:newtab', 'about:blank', 'about:home', ''].includes(url);
     
-    // Logic: exclude system pages UNLESS it's a blank page AND discardNewTabs is enabled
     if (isSystem && (!isBlank || !discardNewTabs)) return false;
     
     return !(!allowPinned && tab.pinned);
@@ -115,7 +177,28 @@ const populateTabsList = async () => {
   const activeTabsCount = relevantTabs.filter(t => !t.discarded).length;
   $('#s').innerText = `${activeTabsCount} / ${relevantTabs.length}`;
 
+  const whitelistedTabs = [];
+  const otherTabs = [];
+
   relevantTabs.filter(t => !t.discarded).forEach(tab => {
+    const domain = getDomain(tab.url);
+    if (whitelist.includes(domain)) {
+      whitelistedTabs.push(tab);
+    } else {
+      otherTabs.push(tab);
+    }
+  });
+
+  if (whitelistedTabs.length === 0) {
+    whitelistedHeader.style.display = 'none';
+    whitelistedTabsList.style.display = 'none';
+  } else {
+    whitelistedHeader.style.display = '';
+    whitelistedTabsList.style.display = '';
+  }
+
+  const renderTab = (tab, container, isWhitelisted) => {
+    const domain = getDomain(tab.url);
     const isReallyAudible = tab.audible && !tab.mutedInfo?.muted;
     const item = document.createElement('div');
     item.className = 'tab-item';
@@ -136,6 +219,17 @@ const populateTabsList = async () => {
     timerLabel.dataset.audible = isReallyAudible;
     timerLabel.dataset.discarded = false;
     timerLabel.dataset.pinned = tab.pinned;
+    timerLabel.dataset.url = tab.url;
+
+    if (isWhitelisted) {
+      const checkMark = document.createElement('span');
+      checkMark.innerText = '✓ ';
+      checkMark.style.color = 'var(--accent)';
+      checkMark.style.fontSize = '10px';
+      checkMark.style.marginRight = '4px';
+      checkMark.title = 'Whitelisted';
+      titleContainer.append(checkMark);
+    }
 
     titleContainer.append(titleText, timerLabel);
     
@@ -149,7 +243,7 @@ const populateTabsList = async () => {
 
     item.append(titleContainer);
 
-    if (!tab.active && !isReallyAudible) {
+    if (!tab.active && !isReallyAudible && !isWhitelisted) {
       const discardBtn = document.createElement('button');
       discardBtn.className = 'status-btn';
       discardBtn.innerText = 'OFF';
@@ -164,11 +258,20 @@ const populateTabsList = async () => {
         activeIndicator.style.textAlign = 'center';
         activeIndicator.style.opacity = '0.5';
         activeIndicator.style.fontWeight = '800';
+      } else if (isWhitelisted) {
+        activeIndicator.innerText = 'SAFE';
+        activeIndicator.style.fontSize = '8px';
+        activeIndicator.style.textAlign = 'center';
+        activeIndicator.style.color = 'var(--accent)';
+        activeIndicator.style.fontWeight = '800';
       }
       item.append(activeIndicator);
     }
-    listContainer.appendChild(item);
-  });
+    container.appendChild(item);
+  };
+
+  whitelistedTabs.forEach(tab => renderTab(tab, whitelistedTabsList, true));
+  otherTabs.forEach(tab => renderTab(tab, otherTabsList, false));
   
   refreshTimerLabels();
 };
@@ -293,15 +396,47 @@ delayInput.oninput = () => {
 
 $('#a').onclick = async () => {
   const settings = await browser.storage.local.get();
+  const whitelist = settings.whitelist || [];
   const targets = await browser.tabs.query({ active: false, audible: false, discarded: false });
   
   targets.forEach(tab => {
     const isSystem = tab.url.startsWith('about:');
-    if (!isSystem && (settings.pin || !tab.pinned)) {
-      browser.tabs.discard(tab.id);
+    const domain = getDomain(tab.url);
+    if (!isSystem && !whitelist.includes(domain) && (settings.pin || !tab.pinned)) {
+      browser.tabs.discard(tab.id).catch(() => {});
     }
   });
   setTimeout(populateTabsList, 300);
+};
+
+$('#whitelist-current-btn').onclick = async () => {
+  const btn = $('#whitelist-current-btn');
+  try {
+    // Get the current active tab in the window that was focused before the popup
+    const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tabs[0]) {
+      const domain = getDomain(tabs[0].url);
+      if (domain) {
+        await addToWhitelist(domain);
+        
+        // Visual feedback
+        const oldText = btn.innerText;
+        btn.innerText = `✓ Added ${domain}`;
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+        
+        setTimeout(() => {
+          btn.innerText = oldText;
+          btn.style.borderColor = '';
+          btn.style.color = '';
+        }, 1500);
+      }
+    }
+  } catch (err) {
+    console.error("Error adding to whitelist:", err);
+    btn.innerText = "✖ Error";
+    setTimeout(() => { btn.innerText = "ADD current tab to whitelist"; }, 1500);
+  }
 };
 
 // --- INITIALIZATION ---

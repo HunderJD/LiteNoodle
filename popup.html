@@ -181,6 +181,18 @@
 
     .stats { font-size: 11px; margin-bottom: 10px; opacity: 0.7; font-weight: 600; }
 
+    .list-header {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 15px 0 5px 0;
+      opacity: 0.6;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
     .tab-list { 
       max-height: 150px; 
       overflow-y: auto; 
@@ -193,6 +205,7 @@
       align-items: center; 
       padding: 6px 4px; 
       border-radius: 4px;
+      position: relative;
     }
     .tab-item:hover { background: rgba(0,0,0,0.03); }
     body.dark .tab-item:hover { background: rgba(255,255,255,0.05); }
@@ -218,6 +231,43 @@
       font-weight: 800; 
       cursor: pointer; 
       border: none; 
+      background: var(--accent);
+      color: white;
+    }
+
+    .remove-whitelist {
+      cursor: pointer;
+      opacity: 0.5;
+      font-weight: bold;
+    }
+    .remove-whitelist:hover { opacity: 1; color: var(--danger); }
+
+    .whitelist-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 6px;
+      font-size: 11px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.02);
+      margin-bottom: 2px;
+    }
+    body.dark .whitelist-item { background: rgba(255,255,255,0.03); }
+
+    #whitelist-current-btn {
+      width: 100%;
+      margin-bottom: 8px;
+      font-size: 10px;
+      padding: 6px;
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      border-radius: 4px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    #whitelist-current-btn:hover {
       background: var(--accent);
       color: white;
     }
@@ -272,6 +322,20 @@
 
     <button id="a">Discard Others</button>
 
+    <div class="list-header">
+      <span>Whitelist</span>
+    </div>
+    
+    <button id="whitelist-current-btn">
+      ADD current tab to whitelist
+    </button>
+
+    <div id="whitelist-list"></div>
+
+    <div class="list-header" id="whitelisted-tabs-header">Whitelisted Tabs</div>
+    <div class="tab-list" id="whitelisted-tabs-list"></div>
+
+    <div class="list-header">Active Tabs</div>
     <div class="tab-list" id="list"></div>
   </div>
   <script src="popup.js"></script>
