@@ -254,19 +254,30 @@
 
     #whitelist-current-btn {
       width: 100%;
+      margin-top: 10px;
       margin-bottom: 8px;
-      font-size: 10px;
-      padding: 6px;
+      font-size: 11px;
+      padding: 10px;
       background: transparent;
-      border: 1px solid var(--accent);
+      border: 1.5px solid var(--accent);
       color: var(--accent);
       border-radius: 4px;
       font-weight: 800;
       cursor: pointer;
-      transition: background 0.2s, color 0.2s;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
     #whitelist-current-btn:hover {
       background: var(--accent);
+      color: white;
+    }
+    #whitelist-current-btn.whitelisted {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+    #whitelist-current-btn.whitelisted:hover {
+      background: var(--danger);
       color: white;
     }
   </style>
@@ -321,21 +332,12 @@
 
     <button id="a">Discard Others</button>
 
-    <div class="list-header">
-      <span>Whitelist</span>
-    </div>
-    
     <button id="whitelist-current-btn">
-      ADD current tab to whitelist
+      Add to whitelist
     </button>
 
-    <div id="whitelist-list"></div>
-
-    <div class="list-header" id="whitelisted-tabs-header">Whitelisted Tabs</div>
-    <div class="tab-list" id="whitelisted-tabs-list"></div>
-
     <div class="list-header">Active Tabs</div>
-    <div class="tab-list" id="list"></div>
+    <div id="list"></div>
   </div>
   <script src="popup.js"></script>
 </body>

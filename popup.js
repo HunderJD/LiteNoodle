@@ -176,7 +176,9 @@ const renderTab = (tab, container, isWhitelisted) => {
   
   const titleText = document.createElement('span');
   titleText.className = 'tab-text';
-  titleText.innerText = tab.title;
+  // Truncate title if too long
+  const displayTitle = tab.title.length > 40 ? tab.title.substring(0, 37) + '...' : tab.title;
+  titleText.innerText = displayTitle;
   if (tab.active) titleText.style.fontWeight = '700';
 
   const timerLabel = document.createElement('span');
@@ -236,26 +238,10 @@ const populateTabsList = async () => {
   const allTabs = await browser.tabs.query({});
   const whitelist = state.whitelist || [];
   
-  const whitelistUI = $('#whitelist-list');
-  const whitelistedTabsUI = $('#whitelisted-tabs-list');
   const activeTabsUI = $('#list');
+  activeTabsUI.innerHTML = '';
 
-  [whitelistUI, whitelistedTabsUI, activeTabsUI].forEach(el => el.innerHTML = '');
-
-  // 1. Render Whitelist Domains
-  if (whitelist.length === 0) {
-    whitelistUI.innerHTML = '<div style="font-size: 10px; opacity: 0.5; padding: 4px;">No domains whitelisted</div>';
-  } else {
-    whitelist.forEach(domain => {
-      const item = document.createElement('div');
-      item.className = 'whitelist-item';
-      item.innerHTML = `<span>${domain}</span><span class="remove-whitelist" title="Remove">×</span>`;
-      item.querySelector('.remove-whitelist').onclick = () => removeFromWhitelist(domain);
-      whitelistUI.appendChild(item);
-    });
-  }
-  
-  // 2. Filter & Sort Tabs
+  // 1. Filter & Sort Tabs
   const relevantTabs = allTabs.filter(tab => {
     const url = tab.url || "";
     const isSystem = url.startsWith('about:') || url.startsWith('chrome:');
@@ -267,20 +253,64 @@ const populateTabsList = async () => {
   const activeTabsCount = relevantTabs.filter(t => !t.discarded).length;
   $('#s').innerText = `${activeTabsCount} / ${relevantTabs.length}`;
 
-  // 3. Render Tabs
+  // 2. Render Tabs
   relevantTabs.filter(t => !t.discarded).forEach(tab => {
     const isWhitelisted = whitelist.includes(getDomain(tab.url));
-    renderTab(tab, isWhitelisted ? whitelistedTabsUI : activeTabsUI, isWhitelisted);
+    renderTab(tab, activeTabsUI, isWhitelisted);
   });
 
-  const hasWhitelisted = whitelistedTabsUI.children.length > 0;
-  $('#whitelisted-tabs-header').style.display = hasWhitelisted ? '' : 'none';
-  whitelistedTabsUI.style.display = hasWhitelisted ? '' : 'none';
-  
+  updateWhitelistButton();
   refreshTimerLabels();
 };
 
+const updateWhitelistButton = async () => {
+  const btn = $('#whitelist-current-btn');
+  const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+  const currentTab = tabs[0];
+  
+  if (!currentTab || !currentTab.url || currentTab.url.startsWith('about:') || currentTab.url.startsWith('chrome:')) {
+    btn.style.display = 'none';
+    return;
+  }
+  
+  btn.style.display = 'block';
+  const domain = getDomain(currentTab.url);
+  const state = await browser.storage.local.get('whitelist');
+  const whitelist = state.whitelist || [];
+  const isWhitelisted = whitelist.includes(domain);
+  
+  if (isWhitelisted) {
+    btn.classList.add('whitelisted');
+    btn.innerText = `${domain} is whitelisted`;
+  } else {
+    btn.classList.remove('whitelisted');
+    btn.innerText = `Whitelist ${domain}`;
+  }
+};
+
 // --- 4. ACTION FUNCTIONS ---
+
+const toggleWhitelist = async () => {
+  const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
+  const currentTab = tabs[0];
+  if (!currentTab) return;
+  
+  const domain = getDomain(currentTab.url);
+  if (!domain) return;
+  
+  const state = await browser.storage.local.get('whitelist');
+  const whitelist = state.whitelist || [];
+  const index = whitelist.indexOf(domain);
+  
+  if (index > -1) {
+    whitelist.splice(index, 1);
+  } else {
+    whitelist.push(domain);
+  }
+  
+  await browser.storage.local.set({ whitelist });
+  populateTabsList();
+};
 
 const addToWhitelist = async (domain) => {
   if (!domain) return;
@@ -305,6 +335,14 @@ const removeFromWhitelist = async (domain) => {
 };
 
 // --- 5. EVENT LISTENERS ---
+
+// React to tab switching and updates while popup is open
+browser.tabs.onActivated.addListener(populateTabsList);
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'complete' || changeInfo.url || changeInfo.title) {
+    populateTabsList();
+  }
+});
 
 $('#theme-toggle').onchange = (e) => {
   const isDark = e.target.checked;
@@ -335,25 +373,7 @@ $('#a').onclick = async () => {
   setTimeout(populateTabsList, 300);
 };
 
-$('#whitelist-current-btn').onclick = async () => {
-  const btn = $('#whitelist-current-btn');
-  try {
-    const tabs = await browser.tabs.query({ active: true, lastFocusedWindow: true });
-    if (tabs[0]) {
-      const domain = getDomain(tabs[0].url);
-      if (domain) {
-        await addToWhitelist(domain);
-        const oldText = btn.innerText;
-        btn.innerText = `✓ Added ${domain}`;
-        btn.style.color = 'var(--accent)';
-        setTimeout(() => { btn.innerText = oldText; btn.style.color = ''; }, 1500);
-      }
-    }
-  } catch (err) {
-    btn.innerText = "✖ Error";
-    setTimeout(() => { btn.innerText = "ADD current tab to whitelist"; }, 1500);
-  }
-};
+$('#whitelist-current-btn').onclick = toggleWhitelist;
 
 // --- 6. INITIALIZATION ---
 
